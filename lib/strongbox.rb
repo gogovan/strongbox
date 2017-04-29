@@ -50,12 +50,7 @@ module Strongbox
     def encrypt_with_public_key(*args)
       include InstanceMethods
 
-      options = args.delete_at(-1) || {}
-
-      unless options.is_a?(Hash)
-        args.push(options)
-        options = {}
-      end
+      options = args.last.is_a?(Hash) ? args.pop : {}
 
       if args.one?
         name = args.first
