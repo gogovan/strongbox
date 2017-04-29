@@ -10,8 +10,6 @@ module Strongbox
 
       @size = 0
 
-      options = Strongbox.options.merge(options)
-
       @base64 = options[:base64]
       @public_key = options[:public_key] || options[:key_pair]
       @private_key = options[:private_key] || options[:key_pair]
