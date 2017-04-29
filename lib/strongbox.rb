@@ -25,9 +25,8 @@ module Strongbox
 
     def included base #:nodoc:
       base.extend ClassMethods
-      if base.respond_to?(:class_attribute)
-        base.class_attribute :lock_options
-      end
+      base.class_attribute :lock_options
+      base.lock_options ||= {}
     end
   end
 
@@ -58,19 +57,12 @@ module Strongbox
         return args.each { |name| encrypt_with_public_key(name, options) }
       end
 
-      if respond_to?(:class_attribute)
-        self.lock_options = {} if lock_options.nil?
-      else
-        class_inheritable_reader :lock_options
-        write_inheritable_attribute(:lock_options, {}) if lock_options.nil?
-      end
-
       lock_options[name] = options.symbolize_keys.reverse_merge Strongbox.options
       define_method name do
         lock_for(name)
       end
 
-      define_method "#{name}=" do | plaintext |
+      define_method "#{name}=" do |plaintext|
         lock_for(name).content plaintext
       end
 
