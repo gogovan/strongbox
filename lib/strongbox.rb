@@ -50,14 +50,10 @@ module Strongbox
       include InstanceMethods
 
       options = args.last.is_a?(Hash) ? args.pop : {}
+      name    = args.shift
 
-      if args.one?
-        name = args.first
-      else
-        return args.each { |name| encrypt_with_public_key(name, options) }
-      end
+      lock_options[name] = Strongbox.options.merge options.symbolize_keys
 
-      lock_options[name] = options.symbolize_keys.reverse_merge Strongbox.options
       define_method name do
         lock_for(name)
       end
@@ -71,6 +67,8 @@ module Strongbox
           lock_for(name).encrypt!
         end
       end
+
+      args.each{ |name| encrypt_with_public_key(name, options) }
     end
   end
 
