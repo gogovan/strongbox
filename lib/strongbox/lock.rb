@@ -5,8 +5,8 @@ module Strongbox
   class Lock
 
     def initialize name, instance, options = {}
-      @name              = name
-      @instance          = instance
+      @name = name
+      @instance = instance
 
       @size = 0
 
@@ -39,7 +39,7 @@ module Strongbox
     end
 
     def encrypt plaintext
-      ensure_required_columns  if @ensure_required_columns
+      ensure_required_columns if @ensure_required_columns
       unless @public_key
         raise StrongboxError.new("#{@instance.class} model does not have public key_file")
       end
@@ -55,8 +55,8 @@ module Strongbox
 
           ciphertext = cipher.update(plaintext)
           ciphertext << cipher.final
-          encrypted_key = public_key.public_encrypt(random_key,@padding)
-          encrypted_iv = public_key.public_encrypt(random_iv,@padding)
+          encrypted_key = public_key.public_encrypt(random_key, @padding)
+          encrypted_iv = public_key.public_encrypt(random_iv, @padding)
           if @base64
             encrypted_key = Base64.encode64(encrypted_key)
             encrypted_iv = Base64.encode64(encrypted_iv)
@@ -64,9 +64,9 @@ module Strongbox
           @instance[@symmetric_key] = encrypted_key
           @instance[@symmetric_iv] = encrypted_iv
         else
-          ciphertext = public_key.public_encrypt(plaintext,@padding)
+          ciphertext = public_key.public_encrypt(plaintext, @padding)
         end
-        ciphertext =  Base64.encode64(ciphertext) if @base64
+        ciphertext = Base64.encode64(ciphertext) if @base64
         @instance[@name] = ciphertext
       end
     end
@@ -80,19 +80,19 @@ module Strongbox
       # Given a private key and a nil password OpenSSL::PKey::RSA.new() will
       # *prompt* for a password, we default to an empty string to avoid that.
       ciphertext ||= @instance[@name]
-      unless @deferred_encryption
-        return nil if ciphertext.nil?
-        return "" if ciphertext.empty?
-      end
 
+      return ciphertext    if !@deferred_encryption && ciphertext.blank?
       return "*encrypted*" if password.nil?
+
       unless @private_key
         raise StrongboxError.new("#{@instance.class} model does not have private key_file")
       end
 
-      if ciphertext
+      if ciphertext.blank?
+        ciphertext
+      else
         ciphertext = Base64.decode64(ciphertext) if @base64
-        private_key = get_rsa_key(@private_key,password)
+        private_key = get_rsa_key(@private_key, password)
         if @symmetric == :always
           random_key = @instance[@symmetric_key]
           random_iv = @instance[@symmetric_iv]
@@ -102,15 +102,13 @@ module Strongbox
           end
           cipher = OpenSSL::Cipher.new(@symmetric_cipher)
           cipher.decrypt
-          cipher.key = private_key.private_decrypt(random_key,@padding)
-          cipher.iv = private_key.private_decrypt(random_iv,@padding)
+          cipher.key = private_key.private_decrypt(random_key, @padding)
+          cipher.iv = private_key.private_decrypt(random_iv, @padding)
           plaintext = cipher.update(ciphertext)
           plaintext << cipher.final
         else
-          plaintext = private_key.private_decrypt(ciphertext,@padding)
+          plaintext = private_key.private_decrypt(ciphertext, @padding)
         end
-      else
-        nil
       end
     end
 
@@ -124,11 +122,11 @@ module Strongbox
 
     # Needed for validations
     def blank?
-      @raw_content.blank? and @instance[@name].blank?
+      @raw_content.blank? && @instance[@name].blank?
     end
 
     def nil?
-      @raw_content.nil? and @instance[@name].nil?
+      @raw_content.nil? && @instance[@name].nil?
     end
 
     def size
@@ -139,34 +137,36 @@ module Strongbox
       @size
     end
 
-  def ensure_required_columns
-    columns = [@name.to_s]
-    columns += [@symmetric_key, @symmetric_iv] if @symmetric == :always
-    columns.each do |column|
-      unless @instance.class.column_names.include? column
-        raise StrongboxError.new("#{@instance.class} model does not have database column \"#{column}\"")
+    def ensure_required_columns
+      columns = [@name.to_s]
+      columns += [@symmetric_key, @symmetric_iv] if @symmetric == :always
+      columns.each do |column|
+        unless @instance.class.column_names.include? column
+          raise StrongboxError.new("#{@instance.class} model does not have database column \"#{column}\"")
+        end
       end
     end
-  end
 
-private
-    def get_rsa_key(key, password = 'PLACEHOLDER')
-      if key.is_a?(Proc)
-        key = key.call
-      end
+  private
 
-      if key.is_a?(Symbol)
-        key = @instance.send(key)
-      end
-
+    def get_rsa_key(key, password = nil)
       return key if key.is_a?(OpenSSL::PKey::RSA)
 
-      if key.respond_to?(:read)
+      if key.is_a?(Proc)
+        key = key.call
+      elsif key.is_a?(Symbol)
+        key = @instance.send(key)
+      elsif key.respond_to?(:read)
         key = key.read
       elsif key !~ /^-+BEGIN .* KEY-+$/
         key = File.read(key)
       end
-      return OpenSSL::PKey::RSA.new(key,password)
+
+      if password.nil?
+        OpenSSL::PKey::RSA.new(key)
+      else
+        OpenSSL::PKey::RSA.new(key, password)
+      end
     end
   end
 end
