@@ -68,7 +68,7 @@ module Strongbox
         end
       end
 
-      args.each{ |name| encrypt_with_public_key(name, options) }
+      args.each{ |arg| encrypt_with_public_key(arg, options) }
     end
   end
 
