@@ -4,11 +4,12 @@ module Strongbox
   # key password is provided.
   class Lock
 
-    def initialize name, instance, options = {}
+    def initialize(name, instance, options = {})
       @name = name
       @instance = instance
 
       @size = 0
+      @raw_content = nil
 
       options = Strongbox.options.merge(options)
 
@@ -39,7 +40,7 @@ module Strongbox
       @raw_content = nil
     end
 
-    def encrypt(plaintext)
+    def encrypt(plaintext, options = {})
       ensure_required_columns
 
       return plaintext if plaintext.blank?
@@ -78,13 +79,13 @@ module Strongbox
       # Given a private key and a nil password OpenSSL::PKey::RSA.new() will
       # *prompt* for a password, we default to an empty string to avoid that.
 
-      return "*encrypted*" if @deferred_encryption && password.nil?
-      return ciphertext    if ciphertext.blank?
+      return "*encrypted*" if password.nil?
+      return ciphertext    if ciphertext.nil? || ciphertext.empty?
 
       unless @private_key
         raise StrongboxError.new("#{@instance.class} model does not have private key_file")
       end
-      
+
       private_key = get_rsa_key(@private_key, password)
 
       if symmetric?

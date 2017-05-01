@@ -1,6 +1,6 @@
 require 'test/test_helper'
 
-class MissingAttribuesTest < Test::Unit::TestCase
+class MissingAttributesTest < Test::Unit::TestCase
   context 'A Class with a secured field without a matching database column' do
     setup do
       ActiveRecord::Base.connection.create_table :dummies, :force => true do |table|
@@ -58,8 +58,8 @@ class MissingAttribuesTest < Test::Unit::TestCase
       rebuild_class {}
     end
 
-    should 'not raise' do
-      assert_nothing_raised do
+    should 'raise' do
+      assert_raise(ActiveModel::MissingAttributeError) do
         Dummy.class_eval do
           encrypt_with_public_key(:secret,
                                   :key_pair => File.join(FIXTURES_DIR,'keypair.pem'),

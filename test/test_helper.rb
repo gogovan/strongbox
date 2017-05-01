@@ -41,12 +41,14 @@ end
 # Call this when changing the options to encrypt_with_public_key
 
 def rebuild_class options = {}
+  default_options = {padding: Strongbox::RSA_PKCS1_PADDING, symmetric_cipher: 'aes-256-cbc'}
+
   ActiveRecord::Base.send(:include, Strongbox)
   Object.send(:remove_const, "Dummy") rescue nil
   Object.const_set("Dummy", Class.new(ActiveRecord::Base))
   Dummy.class_eval do
     include Strongbox
-    encrypt_with_public_key :secret, options
+    encrypt_with_public_key :secret, default_options.merge(options)
   end
   Dummy.reset_column_information
 end
