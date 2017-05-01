@@ -83,6 +83,7 @@ class MethodKeyTest < Test::Unit::TestCase
         table.binary :secret
         table.binary :secret_key
         table.binary :secret_iv
+        table.binary :secret_salt
         table.binary :segreto
 
         table.string :key_pair

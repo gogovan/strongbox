@@ -17,7 +17,7 @@ module Strongbox
         base64: false,
         symmetric: :always,
         padding: RSA_PKCS1_OAEP_PADDING,
-        symmetric_cipher: 'aes-256-cbc',
+        symmetric_cipher: 'aes-256-gcm',
         ensure_required_columns: true,
         deferred_encryption: false
       }

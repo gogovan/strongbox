@@ -1,3 +1,5 @@
+require 'encryptor'
+
 module Strongbox
   # The Lock class encrypts and decrypts the protected attribute.  It
   # automatically encrypts the data when set and decrypts it when the private
@@ -21,6 +23,8 @@ module Strongbox
       @symmetric_cipher = options[:symmetric_cipher]
       @symmetric_key = options[:symmetric_key] || "#{name}_key"
       @symmetric_iv = options[:symmetric_iv] || "#{name}_iv"
+      @symmetric_salt = options[:symmetric_salt] || "#{name}_salt"
+      @symmetric_auth_data = options[:symmetric_auth_data].to_s
       @ensure_required_columns = options[:ensure_required_columns]
       @deferred_encryption = options[:deferred_encryption]
     end
@@ -54,15 +58,22 @@ module Strongbox
       public_key = get_rsa_key(@public_key)
 
       if symmetric?
-        cipher     = OpenSSL::Cipher.new(@symmetric_cipher).encrypt
-        cipher.key = random_key = cipher.random_key
-        cipher.iv  = random_iv = cipher.random_iv
+        # default byte sizes for aes-256-gcm
+        random_key  = options[:key]  || SecureRandom.random_bytes(32)
+        random_iv   = options[:iv]   || SecureRandom.random_bytes(16)
+        random_salt = options[:salt] || SecureRandom.random_bytes(16)
 
-        ciphertext = cipher.update(plaintext)
-        ciphertext << cipher.final
+        ciphertext  = Encryptor.encrypt(plaintext,
+                        algorithm: @symmetric_cipher,
+                        key: random_key,
+                        iv: random_iv,
+                        salt: random_salt,
+                        auth_data: @symmetric_auth_data
+                      )
 
-        @instance[@symmetric_key] = encode(public_key.public_encrypt(random_key, @padding))
-        @instance[@symmetric_iv]  = encode(public_key.public_encrypt(random_iv, @padding))
+        @instance[@symmetric_key]  = encode(public_key.public_encrypt(random_key, @padding))
+        @instance[@symmetric_iv]   = encode(public_key.public_encrypt(random_iv, @padding))
+        @instance[@symmetric_salt] = encode(public_key.public_encrypt(random_salt, @padding))
       else
         ciphertext = public_key.public_encrypt(plaintext, @padding)
       end
@@ -89,12 +100,14 @@ module Strongbox
       private_key = get_rsa_key(@private_key, password)
 
       if symmetric?
-        cipher     = OpenSSL::Cipher.new(@symmetric_cipher).decrypt
-        cipher.key = private_key.private_decrypt(decode(@instance[@symmetric_key]), @padding)
-        cipher.iv  = private_key.private_decrypt(decode(@instance[@symmetric_iv]), @padding)
 
-        plaintext = cipher.update(decode(ciphertext))
-        plaintext << cipher.final
+        plaintext = Encryptor.decrypt(decode(ciphertext),
+                      algorithm: @symmetric_cipher,
+                      key: private_key.private_decrypt(decode(@instance[@symmetric_key]), @padding),
+                      iv: private_key.private_decrypt(decode(@instance[@symmetric_iv]), @padding),
+                      salt: private_key.private_decrypt(decode(@instance[@symmetric_salt]), @padding),
+                      auth_data: @symmetric_auth_data
+                    )
       else
         plaintext = private_key.private_decrypt(decode(ciphertext), @padding)
       end

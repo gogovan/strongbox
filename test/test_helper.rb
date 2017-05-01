@@ -13,7 +13,7 @@ require 'strongbox'
 
 ENV['RAILS_ENV'] ||= 'test'
 
-FIXTURES_DIR = File.join(File.dirname(__FILE__), "fixtures") 
+FIXTURES_DIR = File.join(File.dirname(__FILE__), "fixtures")
 config = YAML::load(IO.read(File.dirname(__FILE__) + '/database.yml'))
 ActiveRecord::Base.logger = Logger.new(File.dirname(__FILE__) + "/debug.log")
 ActiveRecord::Base.establish_connection(config['test'])
@@ -32,6 +32,7 @@ def rebuild_model options = {}
     table.binary :secret
     table.binary :secret_key
     table.binary :secret_iv
+    table.binary :secret_salt
     table.binary :segreto
   end
   rebuild_class options

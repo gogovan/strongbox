@@ -35,9 +35,10 @@ class StrongboxTest < Test::Unit::TestCase
          assert_equal 'Shhhh', @dummy.secret.decrypt(@password)
        end
 
-       should 'generate and store symmetric encryption key and IV' do
+       should 'generate and store symmetric encryption key and IV and salt' do
          assert_not_nil @dummy.attributes['secret_key']
          assert_not_nil @dummy.attributes['secret_iv']
+         assert_not_nil @dummy.attributes['secret_salt']
        end
 
        should 'raise on bad password' do
@@ -95,9 +96,10 @@ class StrongboxTest < Test::Unit::TestCase
            assert_equal 'Setec Astronomy', @dummy.secret.decrypt(@password, encrypted_text)
          end
 
-         should 'not generate and store symmetric encryption key and IV' do
+         should 'not generate and store symmetric encryption key and IV and salt' do
            assert_nil @dummy.attributes['secret_key']
            assert_nil @dummy.attributes['secret_iv']
+           assert_nil @dummy.attributes['secret_salt']
          end
 
        end
@@ -113,9 +115,10 @@ class StrongboxTest < Test::Unit::TestCase
          should 'Base64 encode the ciphertext' do
            # Base64 encoded text is limited to the charaters A–Z, a–z, and 0–9,
            # and is padded with 0 to 2 equal-signs
-           assert_match /^[0-9A-Za-z+\/]+={0,2}$/, @dummy.attributes['secret']
-           assert_match /^[0-9A-Za-z+\/]+={0,2}$/, @dummy.attributes['secret_key']
-           assert_match /^[0-9A-Za-z+\/]+={0,2}$/, @dummy.attributes['secret_iv']
+           assert_match(/^[0-9A-Za-z+\/]+={0,2}$/, @dummy.attributes['secret'])
+           assert_match(/^[0-9A-Za-z+\/]+={0,2}$/, @dummy.attributes['secret_key'])
+           assert_match(/^[0-9A-Za-z+\/]+={0,2}$/, @dummy.attributes['secret_iv'])
+           assert_match(/^[0-9A-Za-z+\/]+={0,2}$/, @dummy.attributes['secret_salt'])
          end
 
          should 'encrypt the data'  do
