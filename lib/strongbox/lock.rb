@@ -60,7 +60,7 @@ module Strongbox
       if symmetric?
         # default byte sizes for aes-256-gcm
         random_key  = options[:key]  || SecureRandom.random_bytes(32)
-        random_iv   = options[:iv]   || SecureRandom.random_bytes(16)
+        random_iv   = options[:iv]   || SecureRandom.random_bytes(@symmetric_cipher =~ /gcm/ ? 12 : 16)
         random_salt = options[:salt] || SecureRandom.random_bytes(16)
 
         ciphertext  = Encryptor.encrypt(plaintext,
