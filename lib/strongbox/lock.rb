@@ -92,6 +92,7 @@ module Strongbox
       # *prompt* for a password, we default to an empty string to avoid that.
       return ciphertext    if !@deferred_encryption && (ciphertext.nil? || ciphertext.empty?)
       return "*encrypted*" if password.nil?
+      return @raw_content  if (@raw_content.nil? || @raw_content.empty?) && (ciphertext.nil? || ciphertext.empty?)
 
       unless @private_key
         raise StrongboxError.new("#{@instance.class} model does not have private key_file")
@@ -100,14 +101,15 @@ module Strongbox
       private_key = get_rsa_key(@private_key, password)
 
       if symmetric?
+        decryption_options = {
+          algorithm: @symmetric_cipher,
+          key: private_key.private_decrypt(decode(@instance[@symmetric_key]), @padding),
+          iv: private_key.private_decrypt(decode(@instance[@symmetric_iv]), @padding),
+          salt: private_key.private_decrypt(decode(@instance[@symmetric_salt]), @padding),
+          auth_data: @symmetric_auth_data
+        }
 
-        plaintext = Encryptor.decrypt(decode(ciphertext),
-                      algorithm: @symmetric_cipher,
-                      key: private_key.private_decrypt(decode(@instance[@symmetric_key]), @padding),
-                      iv: private_key.private_decrypt(decode(@instance[@symmetric_iv]), @padding),
-                      salt: private_key.private_decrypt(decode(@instance[@symmetric_salt]), @padding),
-                      auth_data: @symmetric_auth_data
-                    )
+        plaintext = Encryptor.decrypt(decode(ciphertext), decryption_options)
       else
         plaintext = private_key.private_decrypt(decode(ciphertext), @padding)
       end
