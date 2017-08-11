@@ -27,6 +27,7 @@ module Strongbox
       @symmetric_auth_data = options[:symmetric_auth_data].to_s
       @ensure_required_columns = options[:ensure_required_columns]
       @deferred_encryption = options[:deferred_encryption]
+      @password = options[:decryption_password]
     end
 
     def content(plaintext)
@@ -84,14 +85,13 @@ module Strongbox
     # Given the private key password decrypts the attribute.  Will raise
     # OpenSSL::PKey::RSAError if the password is wrong.
 
-    def decrypt(password = nil, ciphertext = @instance[@name])
+    def decrypt(password = @password, ciphertext = @instance[@name])
       return @raw_content if @deferred_encryption && @raw_content
 
       # Given a private key and a nil password OpenSSL::PKey::RSA.new() will
       # *prompt* for a password, we default to an empty string to avoid that.
-
+      return ciphertext    if !@deferred_encryption && (ciphertext.nil? || ciphertext.empty?)
       return "*encrypted*" if password.nil?
-      return ciphertext    if ciphertext.nil? || ciphertext.empty?
 
       unless @private_key
         raise StrongboxError.new("#{@instance.class} model does not have private key_file")
