@@ -13,7 +13,7 @@ require 'strongbox'
 
 ENV['RAILS_ENV'] ||= 'test'
 
-FIXTURES_DIR = File.join(File.dirname(__FILE__), "fixtures") 
+FIXTURES_DIR = File.join(File.dirname(__FILE__), "fixtures")
 config = YAML::load(IO.read(File.dirname(__FILE__) + '/database.yml'))
 ActiveRecord::Base.logger = Logger.new(File.dirname(__FILE__) + "/debug.log")
 ActiveRecord::Base.establish_connection(config['test'])
@@ -32,6 +32,7 @@ def rebuild_model options = {}
     table.binary :secret
     table.binary :secret_key
     table.binary :secret_iv
+    table.binary :secret_salt
     table.binary :segreto
   end
   rebuild_class options
@@ -41,12 +42,14 @@ end
 # Call this when changing the options to encrypt_with_public_key
 
 def rebuild_class options = {}
+  default_options = {padding: Strongbox::RSA_PKCS1_PADDING, symmetric_cipher: 'aes-256-cbc'}
+
   ActiveRecord::Base.send(:include, Strongbox)
   Object.send(:remove_const, "Dummy") rescue nil
   Object.const_set("Dummy", Class.new(ActiveRecord::Base))
   Dummy.class_eval do
     include Strongbox
-    encrypt_with_public_key :secret, options
+    encrypt_with_public_key :secret, default_options.merge(options)
   end
   Dummy.reset_column_information
 end

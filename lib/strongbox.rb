@@ -5,33 +5,39 @@ require 'strongbox/lock'
 require 'strongbox/version'
 
 module Strongbox
-  RSA_PKCS1_PADDING	= OpenSSL::PKey::RSA::PKCS1_PADDING
-  RSA_SSLV23_PADDING	= OpenSSL::PKey::RSA::SSLV23_PADDING
-  RSA_NO_PADDING		= OpenSSL::PKey::RSA::NO_PADDING
-  RSA_PKCS1_OAEP_PADDING	= OpenSSL::PKey::RSA::PKCS1_OAEP_PADDING
+  RSA_PKCS1_PADDING      = OpenSSL::PKey::RSA::PKCS1_PADDING
+  RSA_SSLV23_PADDING     = OpenSSL::PKey::RSA::SSLV23_PADDING
+  RSA_NO_PADDING         = OpenSSL::PKey::RSA::NO_PADDING
+  RSA_PKCS1_OAEP_PADDING = OpenSSL::PKey::RSA::PKCS1_OAEP_PADDING
 
   class << self
     # Provides for setting the default options for Strongbox
     def options
       @options ||= {
-        :base64 => false,
-        :symmetric => :always,
-        :padding => RSA_PKCS1_PADDING,
-        :symmetric_cipher => 'aes-256-cbc',
-        :ensure_required_columns => true,
-        :deferred_encryption => false
+        base64: false,
+        symmetric: :always,
+        padding: RSA_PKCS1_OAEP_PADDING,
+        symmetric_cipher: 'aes-256-gcm',
+        ensure_required_columns: true,
+        raise_encrypted: true,
+        deferred_encryption: false
       }
     end
 
     def included base #:nodoc:
       base.extend ClassMethods
-      if base.respond_to?(:class_attribute)
-        base.class_attribute :lock_options
-      end
+      base.class_attribute :lock_options
+      base.lock_options ||= {}
     end
   end
 
-  class StrongboxError < StandardError #:nodoc:
+  class MissingKeyError < StandardError #:nodoc:
+  end
+
+  class MissingColumnError < StandardError #:nodoc:
+  end
+
+  class NotDecryptedError < StandardError
   end
 
   module ClassMethods
@@ -50,32 +56,20 @@ module Strongbox
     def encrypt_with_public_key(*args)
       include InstanceMethods
 
-      options = args.delete_at(-1) || {}
+      options = args.last.is_a?(Hash) ? args.pop : {}
+      name    = args.shift
 
-      unless options.is_a?(Hash)
-        args.push(options)
-        options = {}
-      end
+      lock_options[name] = Strongbox.options.merge options.symbolize_keys
 
-      if args.one?
-        name = args.first
-      else
-        return args.each { |name| encrypt_with_public_key(name, options) }
-      end
-
-      if respond_to?(:class_attribute)
-        self.lock_options = {} if lock_options.nil?
-      else
-        class_inheritable_reader :lock_options
-        write_inheritable_attribute(:lock_options, {}) if lock_options.nil?
-      end
-
-      lock_options[name] = options.symbolize_keys.reverse_merge Strongbox.options
       define_method name do
         lock_for(name)
       end
 
-      define_method "#{name}=" do | plaintext |
+      define_method "#{name}_decrypted?" do
+        lock_for(name).decryptable?
+      end
+
+      define_method "#{name}=" do |plaintext|
         lock_for(name).content plaintext
       end
 
@@ -84,6 +78,8 @@ module Strongbox
           lock_for(name).encrypt!
         end
       end
+
+      args.each{ |arg| encrypt_with_public_key(arg, options) }
     end
   end
 

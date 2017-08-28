@@ -1,14 +1,17 @@
+require 'encryptor'
+
 module Strongbox
   # The Lock class encrypts and decrypts the protected attribute.  It
   # automatically encrypts the data when set and decrypts it when the private
   # key password is provided.
   class Lock
 
-    def initialize name, instance, options = {}
-      @name              = name
-      @instance          = instance
+    def initialize(name, instance, options = {})
+      @name = name
+      @instance = instance
 
       @size = 0
+      @raw_content = nil
 
       options = Strongbox.options.merge(options)
 
@@ -20,12 +23,17 @@ module Strongbox
       @symmetric_cipher = options[:symmetric_cipher]
       @symmetric_key = options[:symmetric_key] || "#{name}_key"
       @symmetric_iv = options[:symmetric_iv] || "#{name}_iv"
+      @symmetric_salt = options[:symmetric_salt] || "#{name}_salt"
+      @symmetric_auth_data = options[:symmetric_auth_data].to_s
       @ensure_required_columns = options[:ensure_required_columns]
+      @raise_encrypted = options[:raise_encrypted]
       @deferred_encryption = options[:deferred_encryption]
+      @password = options[:decryption_password]
     end
 
-    def content plaintext
-      @size = plaintext.size unless plaintext.nil? # For validations
+    def content(plaintext)
+      @size = plaintext.to_s.size # For validations
+
       if @deferred_encryption
         @raw_content = plaintext
       else
@@ -38,80 +46,102 @@ module Strongbox
       @raw_content = nil
     end
 
-    def encrypt plaintext
-      ensure_required_columns  if @ensure_required_columns
-      unless @public_key
-        raise StrongboxError.new("#{@instance.class} model does not have public key_file")
-      end
-      if !plaintext.blank?
-        # Using a blank password in OpenSSL::PKey::RSA.new prevents reading
-        # the private key if the file is a key pair
-        public_key = get_rsa_key(@public_key)
-        if @symmetric == :always
-          cipher = OpenSSL::Cipher.new(@symmetric_cipher)
-          cipher.encrypt
-          cipher.key = random_key = cipher.random_key
-          cipher.iv = random_iv = cipher.random_iv
+    def encrypt(plaintext, options = {})
+      ensure_required_columns
 
-          ciphertext = cipher.update(plaintext)
-          ciphertext << cipher.final
-          encrypted_key = public_key.public_encrypt(random_key,@padding)
-          encrypted_iv = public_key.public_encrypt(random_iv,@padding)
-          if @base64
-            encrypted_key = Base64.encode64(encrypted_key)
-            encrypted_iv = Base64.encode64(encrypted_iv)
-          end
-          @instance[@symmetric_key] = encrypted_key
-          @instance[@symmetric_iv] = encrypted_iv
-        else
-          ciphertext = public_key.public_encrypt(plaintext,@padding)
-        end
-        ciphertext =  Base64.encode64(ciphertext) if @base64
-        @instance[@name] = ciphertext
+      return plaintext if plaintext.blank?
+
+      unless @public_key
+        raise MissingKeyError.new("#{@instance.class} model does not have public key_file")
       end
+
+      # Using a blank password in OpenSSL::PKey::RSA.new prevents reading
+      # the private key if the file is a key pair
+      public_key = get_rsa_key(@public_key)
+
+      if symmetric?
+        # default byte sizes for aes-256-gcm
+        random_key  = options[:key]  || SecureRandom.random_bytes(32)
+        random_iv   = options[:iv]   || SecureRandom.random_bytes(@symmetric_cipher =~ /gcm/ ? 12 : 16)
+        random_salt = options[:salt] || SecureRandom.random_bytes(16)
+
+        ciphertext  = Encryptor.encrypt(plaintext,
+                        algorithm: @symmetric_cipher,
+                        key: random_key,
+                        iv: random_iv,
+                        salt: random_salt,
+                        auth_data: @symmetric_auth_data
+                      )
+
+        @instance[@symmetric_key]  = encode(public_key.public_encrypt(random_key, @padding))
+        @instance[@symmetric_iv]   = encode(public_key.public_encrypt(random_iv, @padding))
+        @instance[@symmetric_salt] = encode(public_key.public_encrypt(random_salt, @padding))
+      else
+        ciphertext = public_key.public_encrypt(plaintext, @padding)
+      end
+
+      @instance[@name] = encode(ciphertext)
     end
 
     # Given the private key password decrypts the attribute.  Will raise
     # OpenSSL::PKey::RSAError if the password is wrong.
 
-    def decrypt password = nil, ciphertext = nil
-      return @raw_content if @deferred_encryption && @raw_content
+    def decrypt(password = @password, ciphertext = @instance[@name])
+      return @raw_content if decrypted_changes?
 
       # Given a private key and a nil password OpenSSL::PKey::RSA.new() will
       # *prompt* for a password, we default to an empty string to avoid that.
-      ciphertext ||= @instance[@name]
-      unless @deferred_encryption
-        return nil if ciphertext.nil?
-        return "" if ciphertext.empty?
+      return ciphertext if decrypted_ciphertext?(ciphertext)
+
+      if password.nil?
+        return "*encrypted*" unless @raise_encrypted
+        raise NotDecryptedError.new("#{@instance.class}##{@name} is encrypted")
       end
 
-      return "*encrypted*" if password.nil?
+      return @raw_content if decrypted_empty?(ciphertext)
+
       unless @private_key
-        raise StrongboxError.new("#{@instance.class} model does not have private key_file")
+        raise MissingKeyError.new("#{@instance.class} model does not have private key_file")
       end
 
-      if ciphertext
-        ciphertext = Base64.decode64(ciphertext) if @base64
-        private_key = get_rsa_key(@private_key,password)
-        if @symmetric == :always
-          random_key = @instance[@symmetric_key]
-          random_iv = @instance[@symmetric_iv]
-          if @base64
-            random_key = Base64.decode64(random_key)
-            random_iv = Base64.decode64(random_iv)
-          end
-          cipher = OpenSSL::Cipher.new(@symmetric_cipher)
-          cipher.decrypt
-          cipher.key = private_key.private_decrypt(random_key,@padding)
-          cipher.iv = private_key.private_decrypt(random_iv,@padding)
-          plaintext = cipher.update(ciphertext)
-          plaintext << cipher.final
-        else
-          plaintext = private_key.private_decrypt(ciphertext,@padding)
-        end
+      private_key = get_rsa_key(@private_key, password)
+
+      if symmetric?
+        decryption_options = {
+          algorithm: @symmetric_cipher,
+          key: private_key.private_decrypt(decode(@instance[@symmetric_key]), @padding),
+          iv: private_key.private_decrypt(decode(@instance[@symmetric_iv]), @padding),
+          salt: private_key.private_decrypt(decode(@instance[@symmetric_salt]), @padding),
+          auth_data: @symmetric_auth_data
+        }
+
+        plaintext = Encryptor.decrypt(decode(ciphertext), decryption_options)
       else
-        nil
+        plaintext = private_key.private_decrypt(decode(ciphertext), @padding)
       end
+
+      plaintext
+    end
+
+    def decryptable?
+      decrypted_changes? || decrypted_ciphertext?(@instance[@name]) ||
+      (!@password.nil? && !@private_key.nil?)
+    end
+
+    def decrypted_changes?
+      !!(@deferred_encryption && @raw_content)
+    end
+
+    def decrypted_ciphertext?(ciphertext = @instance[@name])
+      !decrypted_changes? && (!@deferred_encryption && (ciphertext.nil? || ciphertext.empty?))
+    end
+
+    def decrypted_empty?(ciphertext = @instance[@name])
+      !decrypted_ciphertext? && (@raw_content.nil? || @raw_content.empty?) && (ciphertext.nil? || ciphertext.empty?)
+    end
+
+    def symmetric?
+      @symmetric == :always
     end
 
     def to_s
@@ -124,11 +154,11 @@ module Strongbox
 
     # Needed for validations
     def blank?
-      @raw_content.blank? and @instance[@name].blank?
+      @raw_content.blank? && @instance[@name].blank?
     end
 
     def nil?
-      @raw_content.nil? and @instance[@name].nil?
+      @raw_content.nil? && @instance[@name].nil?
     end
 
     def size
@@ -139,34 +169,46 @@ module Strongbox
       @size
     end
 
-  def ensure_required_columns
-    columns = [@name.to_s]
-    columns += [@symmetric_key, @symmetric_iv] if @symmetric == :always
-    columns.each do |column|
-      unless @instance.class.column_names.include? column
-        raise StrongboxError.new("#{@instance.class} model does not have database column \"#{column}\"")
+    def encode(value)
+      @base64 ? Base64.encode64(value) : value
+    end
+
+    def decode(value)
+      @base64 ? Base64.decode64(value) : value
+    end
+
+    def ensure_required_columns
+      return unless @ensure_required_columns
+
+      columns = [@name.to_s]
+      columns += [@symmetric_key, @symmetric_iv] if symmetric?
+      columns.each do |column|
+        unless @instance.class.column_names.include? column
+          raise MissingColumnError.new("#{@instance.class} model does not have database column \"#{column}\"")
+        end
       end
     end
-  end
 
-private
-    def get_rsa_key(key, password = 'PLACEHOLDER')
-      if key.is_a?(Proc)
-        key = key.call
-      end
+  private
 
-      if key.is_a?(Symbol)
-        key = @instance.send(key)
-      end
-
+    def get_rsa_key(key, password = nil)
       return key if key.is_a?(OpenSSL::PKey::RSA)
 
-      if key.respond_to?(:read)
+      if key.is_a?(Proc)
+        key = key.call
+      elsif key.is_a?(Symbol)
+        key = @instance.send(key)
+      elsif key.respond_to?(:read)
         key = key.read
       elsif key !~ /^-+BEGIN .* KEY-+$/
         key = File.read(key)
       end
-      return OpenSSL::PKey::RSA.new(key,password)
+
+      if password.nil?
+        OpenSSL::PKey::RSA.new(key)
+      else
+        OpenSSL::PKey::RSA.new(key, password)
+      end
     end
   end
 end
