@@ -19,6 +19,7 @@ module Strongbox
         padding: RSA_PKCS1_OAEP_PADDING,
         symmetric_cipher: 'aes-256-gcm',
         ensure_required_columns: true,
+        raise_encrypted: true,
         deferred_encryption: false
       }
     end
@@ -30,7 +31,13 @@ module Strongbox
     end
   end
 
-  class StrongboxError < StandardError #:nodoc:
+  class MissingKeyError < StandardError #:nodoc:
+  end
+
+  class MissingColumnError < StandardError #:nodoc:
+  end
+
+  class NotDecryptedError < StandardError
   end
 
   module ClassMethods
@@ -56,6 +63,10 @@ module Strongbox
 
       define_method name do
         lock_for(name)
+      end
+
+      define_method "#{name}_decrypted?" do
+        lock_for(name).decryptable?
       end
 
       define_method "#{name}=" do |plaintext|

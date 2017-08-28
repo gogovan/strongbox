@@ -26,6 +26,7 @@ module Strongbox
       @symmetric_salt = options[:symmetric_salt] || "#{name}_salt"
       @symmetric_auth_data = options[:symmetric_auth_data].to_s
       @ensure_required_columns = options[:ensure_required_columns]
+      @raise_encrypted = options[:raise_encrypted]
       @deferred_encryption = options[:deferred_encryption]
       @password = options[:decryption_password]
     end
@@ -51,7 +52,7 @@ module Strongbox
       return plaintext if plaintext.blank?
 
       unless @public_key
-        raise StrongboxError.new("#{@instance.class} model does not have public key_file")
+        raise MissingKeyError.new("#{@instance.class} model does not have public key_file")
       end
 
       # Using a blank password in OpenSSL::PKey::RSA.new prevents reading
@@ -86,16 +87,21 @@ module Strongbox
     # OpenSSL::PKey::RSAError if the password is wrong.
 
     def decrypt(password = @password, ciphertext = @instance[@name])
-      return @raw_content if @deferred_encryption && @raw_content
+      return @raw_content if decrypted_changes?
 
       # Given a private key and a nil password OpenSSL::PKey::RSA.new() will
       # *prompt* for a password, we default to an empty string to avoid that.
-      return ciphertext    if !@deferred_encryption && (ciphertext.nil? || ciphertext.empty?)
-      return "*encrypted*" if password.nil?
-      return @raw_content  if (@raw_content.nil? || @raw_content.empty?) && (ciphertext.nil? || ciphertext.empty?)
+      return ciphertext if decrypted_ciphertext?(ciphertext)
+
+      if password.nil?
+        return "*encrypted*" unless @raise_encrypted
+        raise NotDecryptedError.new("#{@instance.class}##{@name} is encrypted")
+      end
+
+      return @raw_content if decrypted_empty?(ciphertext)
 
       unless @private_key
-        raise StrongboxError.new("#{@instance.class} model does not have private key_file")
+        raise MissingKeyError.new("#{@instance.class} model does not have private key_file")
       end
 
       private_key = get_rsa_key(@private_key, password)
@@ -115,6 +121,23 @@ module Strongbox
       end
 
       plaintext
+    end
+
+    def decryptable?
+      decrypted_changes? || decrypted_ciphertext?(@instance[@name]) ||
+      (!@password.nil? && !@private_key.nil?)
+    end
+
+    def decrypted_changes?
+      !!(@deferred_encryption && @raw_content)
+    end
+
+    def decrypted_ciphertext?(ciphertext = @instance[@name])
+      !decrypted_changes? && (!@deferred_encryption && (ciphertext.nil? || ciphertext.empty?))
+    end
+
+    def decrypted_empty?(ciphertext = @instance[@name])
+      !decrypted_ciphertext? && (@raw_content.nil? || @raw_content.empty?) && (ciphertext.nil? || ciphertext.empty?)
     end
 
     def symmetric?
@@ -161,7 +184,7 @@ module Strongbox
       columns += [@symmetric_key, @symmetric_iv] if symmetric?
       columns.each do |column|
         unless @instance.class.column_names.include? column
-          raise StrongboxError.new("#{@instance.class} model does not have database column \"#{column}\"")
+          raise MissingColumnError.new("#{@instance.class} model does not have database column \"#{column}\"")
         end
       end
     end
